@@ -9,34 +9,28 @@ private enum Constants {
         static let titleLines = 2
         static let notesLines = 1
         static let largeTextNotesLines = 2
-        static let badgeHorizontalPadding: CGFloat = 8
-        static let badgeVerticalPadding: CGFloat = 3
-        static let badgeOpacity = 0.15
         static let toggleFont = Font.title2
         static let notesFont = Font.subheadline
-        static let badgeFont = Font.caption2.weight(.semibold)
     }
 
     enum Symbols {
         static let done = "checkmark.circle.fill"
         static let notDone = "circle"
-        static let high = "exclamationmark.2"
-        static let medium = "exclamationmark"
-        static let low = "arrow.down"
     }
 
     enum Strings {
         static let done: LocalizedStringKey = "Done"
         static let notDone: LocalizedStringKey = "Not done"
-        static let markDone: LocalizedStringKey = "Mark as done"
-        static let markNotDone: LocalizedStringKey = "Mark as not done"
-        static func priority(_ name: String) -> String { String(localized: "Priority: \(name)") }
+        static let markDone: LocalizedStringKey = "Mark done"
+        static let markNotDone: LocalizedStringKey = "Mark not done"
+        static let delete: LocalizedStringKey = "Delete"
     }
 }
 
 struct TaskRowView: View {
     let task: TaskItem
     let onToggle: () -> Void
+    let onDelete: () -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -62,6 +56,7 @@ struct TaskRowView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(notesLimit)
             }
+            DueDateLabel(task: task)
         }
     }
 
@@ -90,37 +85,21 @@ struct TaskRowView: View {
             named: task.isDone ? Constants.Strings.markNotDone : Constants.Strings.markDone,
             onToggle
         )
+        .accessibilityAction(named: Constants.Strings.delete, onDelete)
     }
 }
 
-private struct PriorityBadge: View {
-    let priority: Priority
-
-    private var color: Color {
-        switch priority {
-        case .high: .red
-        case .medium: .orange
-        case .low: .gray
-        }
-    }
-
-    private var symbol: String {
-        switch priority {
-        case .high: Constants.Symbols.high
-        case .medium: Constants.Symbols.medium
-        case .low: Constants.Symbols.low
-        }
-    }
-
-    var body: some View {
-        Label(priority.title, systemImage: symbol)
-            .labelStyle(.titleAndIcon)
-            .font(Constants.Layout.badgeFont)
-            .padding(.horizontal, Constants.Layout.badgeHorizontalPadding)
-            .padding(.vertical, Constants.Layout.badgeVerticalPadding)
-            .foregroundStyle(color)
-            .background(color.opacity(Constants.Layout.badgeOpacity), in: .capsule)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Constants.Strings.priority(priority.title))
+#if DEBUG
+#Preview("States") {
+    List(PreviewData.tasks) { task in
+        TaskRowView(task: task, onToggle: {}, onDelete: {})
     }
 }
+
+#Preview("Accessibility size") {
+    List(PreviewData.tasks) { task in
+        TaskRowView(task: task, onToggle: {}, onDelete: {})
+    }
+    .dynamicTypeSize(.accessibility3)
+}
+#endif

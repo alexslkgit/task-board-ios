@@ -11,6 +11,7 @@ actor StubTaskRepository: TaskRepository {
     }
 
     func setShouldFail(_ value: Bool) { shouldFail = value }
+    func setTasks(_ value: [TaskItem]) { tasks = value }
 
     func loadTasks(forceRefresh: Bool) async throws -> [TaskItem] {
         try check()
@@ -43,12 +44,38 @@ actor StubTaskRepository: TaskRepository {
 actor StubTaskAPI: TaskAPI {
     var tasks: [TaskItem]
     var shouldFail = false
+    private(set) var fetchCount = 0
+    private var gateArmed = false
+    private let gate: AsyncStream<Void>
+    private let gateContinuation: AsyncStream<Void>.Continuation
+    /// Yields once when a gated fetch has taken its snapshot and is waiting for `openGate()`.
+    nonisolated let gateEntered: AsyncStream<Void>
+    private let gateEnteredContinuation: AsyncStream<Void>.Continuation
 
-    init(tasks: [TaskItem]) { self.tasks = tasks }
+    init(tasks: [TaskItem]) {
+        self.tasks = tasks
+        (gate, gateContinuation) = AsyncStream.makeStream()
+        (gateEntered, gateEnteredContinuation) = AsyncStream.makeStream()
+    }
 
     func setShouldFail(_ value: Bool) { shouldFail = value }
+    func setTasks(_ value: [TaskItem]) { tasks = value }
 
-    func fetchTasks() async throws -> [TaskItem] { tasks }
+    /// The next fetch returns the data as it was when it started, but only after `openGate()`.
+    func armGate() { gateArmed = true }
+
+    nonisolated func openGate() { gateContinuation.yield() }
+
+    func fetchTasks() async throws -> [TaskItem] {
+        fetchCount += 1
+        let snapshot = tasks
+        if gateArmed {
+            gateArmed = false
+            gateEnteredContinuation.yield()
+            for await _ in gate { break }
+        }
+        return snapshot
+    }
 
     func create(_ task: TaskItem) async throws -> TaskItem {
         if shouldFail { throw TaskAPIError.network }
@@ -58,10 +85,12 @@ actor StubTaskAPI: TaskAPI {
 
     func update(_ task: TaskItem) async throws -> TaskItem {
         if shouldFail { throw TaskAPIError.network }
+        if let i = tasks.firstIndex(where: { $0.id == task.id }) { tasks[i] = task }
         return task
     }
 
     func delete(id: TaskItem.ID) async throws {
         if shouldFail { throw TaskAPIError.network }
+        tasks.removeAll { $0.id == id }
     }
 }

@@ -29,7 +29,7 @@ private enum Constants {
         static let error = "exclamationmark.circle.fill"
         static let dismiss = "xmark"
         static let deleted = "trash"
-        static let unavailable = "trash"
+        static let sort = "arrow.up.arrow.down"
     }
 
     enum Strings {
@@ -43,33 +43,26 @@ private enum Constants {
         static let dismiss: LocalizedStringKey = "Dismiss"
         static let undo: LocalizedStringKey = "Undo"
         static let deleted = String(localized: "Task deleted")
-        static let unavailable: LocalizedStringKey = "Task unavailable"
-        static let unavailableDescription: LocalizedStringKey = "This task was deleted."
     }
 }
 
 struct TaskListView: View {
     @Bindable var viewModel: TaskListViewModel
     @State private var showingAdd = false
+    @SceneStorage("sortOrder") private var storedSortOrder = TaskListViewModel.SortOrder.created
+    @SceneStorage("searchText") private var storedSearchText = ""
 
     var body: some View {
         NavigationStack {
             content
                 .navigationTitle(Constants.Strings.title)
                 .navigationDestination(for: TaskItem.ID.self) { id in
-                    if let task = viewModel.task(id: id) {
-                        TaskFormView(viewModel: viewModel, mode: .edit(task))
-                    } else {
-                        ContentUnavailableView(
-                            Constants.Strings.unavailable,
-                            systemImage: Constants.Symbols.unavailable,
-                            description: Text(Constants.Strings.unavailableDescription)
-                        )
-                        .onAppear { Logger.ui.info("Deleted-while-opening state shown") }
-                    }
+                    TaskDetailView(viewModel: viewModel, taskID: id)
                 }
-                .searchable(text: $viewModel.searchText)
                 .toolbar {
+                    if !viewModel.tasks.isEmpty {
+                        ToolbarItem(placement: .topBarLeading) { sortMenu }
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button(Constants.Strings.addTask, systemImage: Constants.Symbols.add) { showingAdd = true }
                     }
@@ -79,7 +72,6 @@ struct TaskListView: View {
                         TaskFormView(viewModel: viewModel, mode: .add)
                     }
                 }
-                .safeAreaInset(edge: .bottom) { banners }
                 .task { await viewModel.load() }
                 .task(id: viewModel.mutationError) {
                     guard viewModel.mutationError != nil else { return }
@@ -106,13 +98,50 @@ struct TaskListView: View {
                     AccessibilityNotification.Announcement(Constants.Strings.deleted).post()
                 }
         }
+        .safeAreaInset(edge: .bottom) { banners }
+        .onAppear {
+            viewModel.sortOrder = storedSortOrder
+            viewModel.searchText = storedSearchText
+        }
+        .onChange(of: viewModel.sortOrder) { _, order in storedSortOrder = order }
+        .onChange(of: viewModel.searchText) { _, text in storedSearchText = text }
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            Picker(Constants.Strings.sortBy, selection: $viewModel.sortOrder) {
+                ForEach(TaskListViewModel.SortOrder.allCases) { order in
+                    Text(order.title).tag(order)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label(viewModel.sortOrder.title, systemImage: Constants.Symbols.sort)
+                .labelStyle(.titleAndIcon)
+        }
+        .accessibilityLabel(Constants.Strings.sortBy)
+        .accessibilityValue(viewModel.sortOrder.title)
     }
 
     @ViewBuilder
     private var content: some View {
-        if viewModel.tasks.isEmpty, viewModel.loadState == .idle || viewModel.loadState == .loading {
-            ProgressView()
-        } else if viewModel.tasks.isEmpty, case .failed(let message) = viewModel.loadState {
+        if viewModel.tasks.isEmpty {
+            emptyState
+        } else {
+            Group {
+                if viewModel.visibleTasks.isEmpty {
+                    ContentUnavailableView.search(text: viewModel.searchText)
+                } else {
+                    taskList
+                }
+            }
+            .searchable(text: $viewModel.searchText)
+        }
+    }
+
+    @ViewBuilder
+    private var emptyState: some View {
+        if case .failed(let message) = viewModel.loadState {
             ContentUnavailableView {
                 Label(Constants.Strings.loadFailed, systemImage: Constants.Symbols.loadFailed)
             } description: {
@@ -132,33 +161,29 @@ struct TaskListView: View {
                 Button(Constants.Strings.addTask) { showingAdd = true }
                     .buttonStyle(.borderedProminent)
             }
-        } else if viewModel.visibleTasks.isEmpty {
-            ContentUnavailableView.search(text: viewModel.searchText)
         } else {
-            List {
-                Section {
-                    Picker(Constants.Strings.sortBy, selection: $viewModel.sortOrder) {
-                        ForEach(TaskListViewModel.SortOrder.allCases) { order in
-                            Text(order.title).tag(order)
-                        }
-                    }
-                    .pickerStyle(.menu)
+            ProgressView()
+        }
+    }
+
+    private var taskList: some View {
+        List {
+            ForEach(viewModel.visibleTasks) { task in
+                NavigationLink(value: task.id) {
+                    TaskRowView(
+                        task: task,
+                        onToggle: { Task { await viewModel.toggleDone(task) } },
+                        onDelete: { Task { await viewModel.delete(task) } }
+                    )
                 }
-                ForEach(viewModel.visibleTasks) { task in
-                    NavigationLink(value: task.id) {
-                        TaskRowView(task: task) {
-                            Task { await viewModel.toggleDone(task) }
-                        }
-                    }
-                    .swipeActions(edge: .trailing) {
-                        Button(Constants.Strings.delete, systemImage: Constants.Symbols.delete, role: .destructive) {
-                            Task { await viewModel.delete(task) }
-                        }
+                .swipeActions(edge: .trailing) {
+                    Button(Constants.Strings.delete, systemImage: Constants.Symbols.delete, role: .destructive) {
+                        Task { await viewModel.delete(task) }
                     }
                 }
             }
-            .refreshable { await viewModel.refresh() }
         }
+        .refreshable { await viewModel.refresh() }
     }
 
     @ViewBuilder
@@ -213,3 +238,13 @@ private struct Banner<Action: View>: View {
         .shadow(radius: Constants.Layout.bannerShadowRadius, y: Constants.Layout.bannerShadowOffset)
     }
 }
+
+#if DEBUG
+#Preview("Tasks") {
+    TaskListView(viewModel: PreviewData.viewModel())
+}
+
+#Preview("Empty") {
+    TaskListView(viewModel: PreviewData.viewModel(seed: []))
+}
+#endif

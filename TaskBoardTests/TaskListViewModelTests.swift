@@ -97,4 +97,76 @@ struct TaskListViewModelTests {
         vm.sortOrder = .priority
         #expect(vm.visibleTasks.first?.id == high.id)
     }
+
+    @Test func statusSortPutsOpenTasksFirstThenPriority() async {
+        let doneHigh = TaskItem(title: "Done high", priority: .high, isDone: true, createdAt: Date(timeIntervalSince1970: 1))
+        let openLow = TaskItem(title: "Open low", priority: .low, createdAt: Date(timeIntervalSince1970: 2))
+        let openHigh = TaskItem(title: "Open high", priority: .high, createdAt: Date(timeIntervalSince1970: 3))
+        let vm = TaskListViewModel(repository: StubTaskRepository(tasks: [doneHigh, openLow, openHigh]))
+        await vm.load()
+
+        vm.sortOrder = .status
+
+        #expect(vm.visibleTasks.map(\.id) == [openHigh.id, openLow.id, doneHigh.id])
+    }
+
+    @Test func dueDateSortPutsEarliestFirstAndUndatedLast() async {
+        let late = TaskItem(title: "Late", createdAt: Date(timeIntervalSince1970: 1), dueDate: Date(timeIntervalSince1970: 5000))
+        let undatedOld = TaskItem(title: "Undated old", createdAt: Date(timeIntervalSince1970: 2))
+        let early = TaskItem(title: "Early", createdAt: Date(timeIntervalSince1970: 3), dueDate: Date(timeIntervalSince1970: 1000))
+        let undatedNew = TaskItem(title: "Undated new", createdAt: Date(timeIntervalSince1970: 4))
+        let sameDayOlder = TaskItem(title: "Tie older", createdAt: Date(timeIntervalSince1970: 0), dueDate: Date(timeIntervalSince1970: 1000))
+        let vm = TaskListViewModel(repository: StubTaskRepository(tasks: [late, undatedNew, early, undatedOld, sameDayOlder]))
+        await vm.load()
+
+        vm.sortOrder = .dueDate
+
+        #expect(vm.visibleTasks.map(\.id) == [sameDayOlder.id, early.id, late.id, undatedOld.id, undatedNew.id])
+    }
+
+    @Test func refreshSuccessReplacesList() async {
+        let old = TaskItem(title: "Old")
+        let fresh = TaskItem(title: "Fresh")
+        let stub = StubTaskRepository(tasks: [old])
+        let vm = TaskListViewModel(repository: stub)
+        await vm.load()
+
+        await stub.setTasks([fresh])
+        await vm.refresh()
+
+        #expect(vm.tasks.map(\.id) == [fresh.id])
+        #expect(vm.loadState == .loaded)
+        #expect(vm.mutationError == nil)
+    }
+
+    @Test func editPersistsAcrossReload() async {
+        let repository = makeSeededRepository()
+        let vm = TaskListViewModel(repository: repository)
+        await vm.load()
+        var edited = vm.tasks[0]
+        edited.title = "Edited title"
+        edited.dueDate = Date(timeIntervalSince1970: 1_000)
+
+        let saved = await vm.update(edited)
+        await vm.refresh()
+
+        #expect(saved)
+        #expect(vm.task(id: edited.id) == edited)
+        let reloaded = TaskListViewModel(repository: repository)
+        await reloaded.load()
+        #expect(reloaded.task(id: edited.id) == edited)
+    }
+
+    @Test func addStoresDueDate() async {
+        let stub = StubTaskRepository()
+        let vm = TaskListViewModel(repository: stub)
+        await vm.load()
+        let due = Date(timeIntervalSince1970: 2_000)
+
+        let saved = await vm.add(title: "Pay rent", notes: "", priority: .high, dueDate: due)
+
+        #expect(saved)
+        #expect(vm.tasks.first?.dueDate == due)
+        #expect(await stub.tasks.first?.dueDate == due)
+    }
 }

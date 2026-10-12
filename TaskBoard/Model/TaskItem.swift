@@ -23,6 +23,7 @@ nonisolated struct TaskItem: Identifiable, Hashable, Codable, Sendable {
     var priority: Priority
     var isDone: Bool
     var createdAt: Date
+    var dueDate: Date?
 
     init(
         id: UUID = UUID(),
@@ -30,7 +31,8 @@ nonisolated struct TaskItem: Identifiable, Hashable, Codable, Sendable {
         notes: String = "",
         priority: Priority = .medium,
         isDone: Bool = false,
-        createdAt: Date = .now
+        createdAt: Date = .now,
+        dueDate: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -38,5 +40,6 @@ nonisolated struct TaskItem: Identifiable, Hashable, Codable, Sendable {
         self.priority = priority
         self.isDone = isDone
         self.createdAt = createdAt
+        self.dueDate = dueDate
     }
 }

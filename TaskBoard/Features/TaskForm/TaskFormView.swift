@@ -4,6 +4,7 @@ import SwiftUI
 private enum Constants {
     enum Layout {
         static let notesLines = 3...8
+        static let saveErrorID = "saveError"
     }
 
     enum Symbols {
@@ -20,7 +21,12 @@ private enum Constants {
         static let notes: LocalizedStringKey = "Notes"
         static let priority: LocalizedStringKey = "Priority"
         static let done: LocalizedStringKey = "Done"
+        static let dueDate: LocalizedStringKey = "Due date"
+        static let due: LocalizedStringKey = "Due"
         static let cancel: LocalizedStringKey = "Cancel"
+        static let discardPrompt: LocalizedStringKey = "Discard changes?"
+        static let discard: LocalizedStringKey = "Discard changes"
+        static let keepEditing: LocalizedStringKey = "Keep editing"
         static let save: LocalizedStringKey = "Save"
     }
 }
@@ -33,30 +39,34 @@ struct TaskFormView: View {
 
     let viewModel: TaskListViewModel
     let mode: Mode
+    private let baseline: TaskItem
 
     @Environment(\.dismiss) private var dismiss
     @State private var title: String
     @State private var notes: String
     @State private var priority: Priority
     @State private var isDone: Bool
+    @State private var hasDueDate: Bool
+    @State private var dueDate: Date
+    @State private var showingDiscard = false
     @State private var isSaving = false
     @State private var saveError: String?
 
     init(viewModel: TaskListViewModel, mode: Mode) {
         self.viewModel = viewModel
         self.mode = mode
+        let base: TaskItem
         switch mode {
-        case .add:
-            _title = State(initialValue: "")
-            _notes = State(initialValue: "")
-            _priority = State(initialValue: .medium)
-            _isDone = State(initialValue: false)
-        case .edit(let task):
-            _title = State(initialValue: task.title)
-            _notes = State(initialValue: task.notes)
-            _priority = State(initialValue: task.priority)
-            _isDone = State(initialValue: task.isDone)
+        case .add: base = TaskItem(title: "")
+        case .edit(let task): base = task
         }
+        baseline = base
+        _title = State(initialValue: base.title)
+        _notes = State(initialValue: base.notes)
+        _priority = State(initialValue: base.priority)
+        _isDone = State(initialValue: base.isDone)
+        _hasDueDate = State(initialValue: base.dueDate != nil)
+        _dueDate = State(initialValue: base.dueDate ?? Calendar.current.startOfDay(for: .now))
     }
 
     private var editedTask: TaskItem? {
@@ -70,6 +80,18 @@ struct TaskFormView: View {
 
     private var trimmedTitle: String {
         title.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var effectiveDueDate: Date? {
+        hasDueDate ? Calendar.current.startOfDay(for: dueDate) : nil
+    }
+
+    private var hasChanges: Bool {
+        title != baseline.title
+            || notes != baseline.notes
+            || priority != baseline.priority
+            || isDone != baseline.isDone
+            || effectiveDueDate != baseline.dueDate.map { Calendar.current.startOfDay(for: $0) }
     }
 
     var body: some View {
@@ -90,40 +112,68 @@ struct TaskFormView: View {
     }
 
     private var form: some View {
-        Form {
-            Section {
-                TextField(Constants.Strings.title, text: $title)
-                TextField(Constants.Strings.notes, text: $notes, axis: .vertical)
-                    .lineLimit(Constants.Layout.notesLines)
-            }
-            Section {
-                Picker(Constants.Strings.priority, selection: $priority) {
-                    ForEach(Priority.allCases) { Text($0.title).tag($0) }
+        ScrollViewReader { proxy in
+            Form {
+                if let saveError {
+                    Section {
+                        Label(saveError, systemImage: Constants.Symbols.saveError)
+                            .foregroundStyle(.red)
+                    }
+                    .id(Constants.Layout.saveErrorID)
                 }
-                .pickerStyle(.segmented)
-            }
-            if isEditing {
                 Section {
-                    Toggle(Constants.Strings.done, isOn: $isDone)
+                    TextField(Constants.Strings.title, text: $title)
+                    TextField(Constants.Strings.notes, text: $notes, axis: .vertical)
+                        .lineLimit(Constants.Layout.notesLines)
+                }
+                Section {
+                    Picker(Constants.Strings.priority, selection: $priority) {
+                        ForEach(Priority.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                Section {
+                    Toggle(Constants.Strings.dueDate, isOn: $hasDueDate.animation())
+                    if hasDueDate {
+                        DatePicker(Constants.Strings.due, selection: $dueDate, displayedComponents: .date)
+                    }
+                }
+                if isEditing {
+                    Section {
+                        Toggle(Constants.Strings.done, isOn: $isDone)
+                    }
                 }
             }
-            if let saveError {
-                Section {
-                    Label(saveError, systemImage: Constants.Symbols.saveError)
-                        .foregroundStyle(.red)
-                }
+            .onChange(of: saveError) { _, message in
+                guard message != nil else { return }
+                withAnimation { proxy.scrollTo(Constants.Layout.saveErrorID, anchor: .top) }
             }
         }
+        .interactiveDismissDisabled(hasChanges || isSaving)
         .toolbar {
-            if !isEditing {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(Constants.Strings.cancel) { dismiss() }
-                }
+            ToolbarItem(placement: .cancellationAction) {
+                Button(Constants.Strings.cancel, action: cancel)
+                    .disabled(isSaving)
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button(Constants.Strings.save, action: save)
                     .disabled(trimmedTitle.isEmpty || isSaving)
             }
+        }
+        .confirmationDialog(Constants.Strings.discardPrompt, isPresented: $showingDiscard, titleVisibility: .visible) {
+            Button(Constants.Strings.discard, role: .destructive) {
+                Logger.ui.info("Changes discarded")
+                dismiss()
+            }
+            Button(Constants.Strings.keepEditing, role: .cancel) {}
+        }
+    }
+
+    private func cancel() {
+        if hasChanges {
+            showingDiscard = true
+        } else {
+            dismiss()
         }
     }
 
@@ -139,9 +189,10 @@ struct TaskFormView: View {
                 task.notes = notes
                 task.priority = priority
                 task.isDone = isDone
+                task.dueDate = effectiveDueDate
                 saved = await viewModel.update(task)
             } else {
-                saved = await viewModel.add(title: trimmedTitle, notes: notes, priority: priority)
+                saved = await viewModel.add(title: trimmedTitle, notes: notes, priority: priority, dueDate: effectiveDueDate)
             }
             isSaving = false
             if saved {
@@ -156,3 +207,19 @@ struct TaskFormView: View {
         }
     }
 }
+
+#if DEBUG
+#Preview("Add") {
+    NavigationStack {
+        TaskFormView(viewModel: PreviewData.viewModel(), mode: .add)
+    }
+}
+
+#Preview("Edit") {
+    let viewModel = PreviewData.viewModel()
+    return NavigationStack {
+        TaskFormView(viewModel: viewModel, mode: .edit(PreviewData.tasks[0]))
+    }
+    .task { await viewModel.load() }
+}
+#endif

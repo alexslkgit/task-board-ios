@@ -87,35 +87,29 @@ actor MockTaskAPI: TaskAPI {
 
 nonisolated private enum SeedConstants {
     static let spacing: TimeInterval = 60
-    static let json = """
-    [{"title":"Renew domain registration","notes":"Expires end of month","priority":"High","done":false},\
-    {"title":"Reply to design feedback","notes":"","priority":"Medium","done":false},\
-    {"title":"Book dentist","notes":"","priority":"Low","done":true},\
-    {"title":"Migrate the analytics pipeline to the new warehouse and validate dashboards","notes":"Long one — check layout","priority":"Medium","done":false}]
-    """
+    static let day: TimeInterval = 24 * 60 * 60
 }
 
 nonisolated extension TaskItem {
     static let seed: [TaskItem] = {
-        // Constant, known-good JSON: a failure here is a programmer error.
-        let dtos = try! JSONDecoder().decode([SeedDTO].self, from: Data(SeedConstants.json.utf8))
+        typealias Entry = (title: String, notes: String, priority: Priority, isDone: Bool, dueInDays: Double?)
+        let entries: [Entry] = [
+            ("Renew domain registration", "Expires end of month", .high, false, 3),
+            ("Reply to design feedback", "", .medium, false, nil),
+            ("Book dentist", "", .low, true, -1),
+            ("Migrate the analytics pipeline to the new warehouse and validate dashboards", "Long one — check layout", .medium, false, nil),
+        ]
         let now = Date.now
         // In the past and in index order, so tasks created later always sort after the seed.
-        return dtos.enumerated().map { index, dto in
+        return entries.enumerated().map { index, entry in
             TaskItem(
-                title: dto.title,
-                notes: dto.notes,
-                priority: Priority.allCases.first { $0.title == dto.priority } ?? .medium,
-                isDone: dto.done,
-                createdAt: now.addingTimeInterval(-Double(dtos.count - index) * SeedConstants.spacing)
+                title: entry.title,
+                notes: entry.notes,
+                priority: entry.priority,
+                isDone: entry.isDone,
+                createdAt: now.addingTimeInterval(-Double(entries.count - index) * SeedConstants.spacing),
+                dueDate: entry.dueInDays.map { now.addingTimeInterval($0 * SeedConstants.day) }
             )
         }
     }()
-}
-
-private nonisolated struct SeedDTO: Decodable {
-    let title: String
-    let notes: String
-    let priority: String
-    let done: Bool
 }

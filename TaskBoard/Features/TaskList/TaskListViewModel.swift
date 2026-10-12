@@ -7,7 +7,7 @@ final class TaskListViewModel {
     enum LoadState: Equatable { case idle, loading, loaded, failed(String) }
 
     enum SortOrder: String, CaseIterable, Identifiable {
-        case created, priority, status
+        case created, priority, status, dueDate
 
         var id: String { rawValue }
 
@@ -16,6 +16,7 @@ final class TaskListViewModel {
             case .created: "Created"
             case .priority: "Priority"
             case .status: "Status"
+            case .dueDate: "Due date"
             }
         }
     }
@@ -96,13 +97,13 @@ final class TaskListViewModel {
     }
 
     @discardableResult
-    func add(title: String, notes: String, priority: Priority) async -> Bool {
+    func add(title: String, notes: String, priority: Priority, dueDate: Date? = nil) async -> Bool {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             Logger.tasks.debug("add ignored, empty title")
             return false
         }
-        let draft = TaskItem(title: trimmed, notes: notes, priority: priority)
+        let draft = TaskItem(title: trimmed, notes: notes, priority: priority, dueDate: dueDate)
         noteMutation(draft.id)
         tasks.append(draft)
         Logger.tasks.debug("add applied optimistically id=\(draft.id.uuidString, privacy: .public) title=\(draft.title, privacy: .private)")
@@ -283,6 +284,13 @@ final class TaskListViewModel {
         case .status:
             if a.isDone != b.isDone { return !a.isDone }
             if a.priority != b.priority { return a.priority > b.priority }
+        case .dueDate:
+            switch (a.dueDate, b.dueDate) {
+            case let (lhs?, rhs?) where lhs != rhs: return lhs < rhs
+            case (.some, .none): return true
+            case (.none, .some): return false
+            default: break
+            }
         }
         return a.createdAt < b.createdAt
     }
