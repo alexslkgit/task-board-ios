@@ -5,6 +5,7 @@ private enum Constants {
     enum Layout {
         static let headerSpacing: CGFloat = 10
         static let badgeSpacing: CGFloat = 12
+        static let statusSpacing: CGFloat = 4
         static let titleFont = Font.title2.weight(.semibold)
         static let statusFont = Font.subheadline
     }
@@ -68,8 +69,14 @@ struct TaskDetailView: View {
                         .strikethrough(task.isDone)
                         .foregroundStyle(task.isDone ? .secondary : .primary)
                     ViewThatFits(in: .horizontal) {
-                        badges(for: task, axis: .horizontal)
-                        badges(for: task, axis: .vertical)
+                        HStack(spacing: Constants.Layout.badgeSpacing) {
+                            PriorityBadge(priority: task.priority)
+                            status(for: task)
+                        }
+                        VStack(alignment: .leading, spacing: Constants.Layout.headerSpacing) {
+                            PriorityBadge(priority: task.priority)
+                            status(for: task)
+                        }
                     }
                 }
             }
@@ -82,9 +89,11 @@ struct TaskDetailView: View {
             }
             Section {
                 if let dueDate = task.dueDate {
-                    LabeledContent(Constants.Strings.dueDate) {
-                        VStack(alignment: .trailing) {
-                            Text(dueDate, format: .dateTime.day().month(.abbreviated).year())
+                    LabeledContent {
+                        Text(dueDate, format: .dateTime.day().month(.abbreviated).year())
+                    } label: {
+                        VStack(alignment: .leading) {
+                            Text(Constants.Strings.dueDate)
                             DueDateLabel(task: task)
                         }
                     }
@@ -104,6 +113,7 @@ struct TaskDetailView: View {
                 Button(Constants.Strings.delete, systemImage: Constants.Symbols.delete, role: .destructive) {
                     confirmingDelete = true
                 }
+                .foregroundStyle(.red)
             }
         }
         .toolbar {
@@ -125,19 +135,14 @@ struct TaskDetailView: View {
         }
     }
 
-    private func badges(for task: TaskItem, axis: Axis) -> some View {
-        let layout = axis == .horizontal
-            ? AnyLayout(HStackLayout(spacing: Constants.Layout.badgeSpacing))
-            : AnyLayout(VStackLayout(alignment: .leading, spacing: Constants.Layout.headerSpacing))
-        return layout {
-            PriorityBadge(priority: task.priority)
-            Label(
-                task.isDone ? Constants.Strings.done : Constants.Strings.notDone,
-                systemImage: task.isDone ? Constants.Symbols.done : Constants.Symbols.notDone
-            )
-            .font(Constants.Layout.statusFont)
-            .foregroundStyle(.secondary)
+    private func status(for task: TaskItem) -> some View {
+        HStack(spacing: Constants.Layout.statusSpacing) {
+            Image(systemName: task.isDone ? Constants.Symbols.done : Constants.Symbols.notDone)
+            Text(task.isDone ? Constants.Strings.done : Constants.Strings.notDone)
         }
+        .font(Constants.Layout.statusFont)
+        .foregroundStyle(.secondary)
+        .fixedSize()
     }
 }
 

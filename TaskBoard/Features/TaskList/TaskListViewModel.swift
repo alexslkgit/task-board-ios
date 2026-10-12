@@ -2,9 +2,18 @@ import Foundation
 import Observation
 import os
 
+/// Each error gets a fresh id, so a repeated identical message still restarts the banner.
+nonisolated struct ErrorBanner: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let message: String
+}
+
 @Observable
 final class TaskListViewModel {
     enum LoadState: Equatable { case idle, loading, loaded, failed(String) }
+
+    /// Outcome of a form save; the form shows the message inline, so it never goes to the list banner.
+    enum SaveResult: Equatable { case saved, failed(String) }
 
     enum SortOrder: String, CaseIterable, Identifiable {
         case created, priority, status, dueDate
@@ -13,23 +22,24 @@ final class TaskListViewModel {
 
         var title: String {
             switch self {
-            case .created: "Created"
-            case .priority: "Priority"
-            case .status: "Status"
-            case .dueDate: "Due date"
+            case .created: String(localized: "Created")
+            case .priority: String(localized: "Priority")
+            case .status: String(localized: "Status")
+            case .dueDate: String(localized: "Due date")
             }
         }
     }
 
     private(set) var tasks: [TaskItem] = []
     private(set) var loadState: LoadState = .idle
-    var mutationError: String?
+    var mutationError: ErrorBanner?
     var searchText = ""
     var sortOrder: SortOrder = .created
     private(set) var recentlyDeleted: TaskItem?
 
     private enum Constants {
-        static let genericError = "Something went wrong. Please try again."
+        static let genericError = String(localized: "Something went wrong. Please try again.")
+        static let emptyTitle = String(localized: "Enter a title.")
     }
 
     @ObservationIgnored private let repository: any TaskRepository
@@ -37,7 +47,9 @@ final class TaskListViewModel {
     /// Last server-acknowledged value of a task with writes in flight; a failed write rolls back to it.
     @ObservationIgnored private var confirmed: [TaskItem.ID: TaskItem] = [:]
     @ObservationIgnored private var mutationCount = 0
+    /// Only fetches in flight can be stale relative to a mutation, so entries are kept just while one runs.
     @ObservationIgnored private var lastMutation: [TaskItem.ID: Int] = [:]
+    @ObservationIgnored private var fetchesInFlight = 0
 
     init(repository: any TaskRepository) {
         self.repository = repository
@@ -52,9 +64,13 @@ final class TaskListViewModel {
     var isEmpty: Bool { loadState == .loaded && tasks.isEmpty }
 
     func load() async {
-        guard loadState != .loading else { return }
+        switch loadState {
+        case .idle, .failed: break
+        case .loading, .loaded: return
+        }
         loadState = .loading
-        let start = mutationCount
+        let start = beginFetch()
+        defer { endFetch() }
         Logger.tasks.info("load started")
         do {
             let fetched = try await repository.loadTasks(forceRefresh: false)
@@ -73,7 +89,8 @@ final class TaskListViewModel {
     }
 
     func refresh() async {
-        let start = mutationCount
+        let start = beginFetch()
+        defer { endFetch() }
         Logger.tasks.info("refresh started")
         do {
             let fetched = try await repository.loadTasks(forceRefresh: true)
@@ -97,11 +114,11 @@ final class TaskListViewModel {
     }
 
     @discardableResult
-    func add(title: String, notes: String, priority: Priority, dueDate: Date? = nil) async -> Bool {
+    func add(title: String, notes: String, priority: Priority, dueDate: Date? = nil) async -> SaveResult {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             Logger.tasks.debug("add ignored, empty title")
-            return false
+            return .failed(Constants.emptyTitle)
         }
         let draft = TaskItem(title: trimmed, notes: notes, priority: priority, dueDate: dueDate)
         noteMutation(draft.id)
@@ -119,21 +136,36 @@ final class TaskListViewModel {
                 replace(saved)
             }
             Logger.tasks.info("add succeeded id=\(saved.id.uuidString, privacy: .public)")
-            return true
+            return .saved
         case .failure(let error):
             if !writes.hasPending(draft.id) { confirmed[draft.id] = nil }
             tasks.removeAll { $0.id == draft.id }
             Logger.tasks.error("add failed id=\(draft.id.uuidString, privacy: .public), draft removed: \(error.localizedDescription, privacy: .public)")
-            showBanner(for: error)
-            return false
+            return .failed(message(for: error))
         }
     }
 
     @discardableResult
-    func update(_ task: TaskItem) async -> Bool {
+    func update(_ task: TaskItem) async -> SaveResult {
+        switch await write(task) {
+        case .success: .saved
+        case .failure(let error): .failed(message(for: error))
+        }
+    }
+
+    func toggleDone(_ task: TaskItem) async {
+        var updated = self.task(id: task.id) ?? task
+        updated.isDone.toggle()
+        // The failed add/delete that removed the row already reported the real error.
+        if case .failure(let error) = await write(updated), self.task(id: task.id) != nil {
+            showBanner(for: error)
+        }
+    }
+
+    private func write(_ task: TaskItem) async -> Result<Void, any Error> {
         guard let current = self.task(id: task.id) else {
             Logger.tasks.info("update ignored, row gone id=\(task.id.uuidString, privacy: .public)")
-            return false
+            return .failure(TaskAPIError.notFound)
         }
         noteMutation(task.id)
         if !writes.hasPending(task.id) { confirmed[task.id] = current }
@@ -148,31 +180,23 @@ final class TaskListViewModel {
         // run() has already released our slot, so true here means a newer write is queued behind us.
         if writes.hasPending(task.id) {
             Logger.tasks.debug("update superseded id=\(task.id.uuidString, privacy: .public)")
-            return true
+            return .success(())
         }
         let settled = confirmed.removeValue(forKey: task.id)
         if let settled { replace(settled) }
         switch result {
         case .success:
             Logger.tasks.info("update succeeded id=\(task.id.uuidString, privacy: .public)")
-            return true
+            return .success(())
         case .failure(let error):
-            // The failed add/delete that removed the row already reported the real error.
             if self.task(id: task.id) == nil {
-                Logger.tasks.info("update failed but row gone, error suppressed id=\(task.id.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                return false
+                Logger.tasks.info("update failed but row gone id=\(task.id.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            } else {
+                let target = settled == nil ? "unchanged" : "last confirmed value"
+                Logger.tasks.error("update failed id=\(task.id.uuidString, privacy: .public), rolled back to \(target, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
-            let target = settled.map { "isDone=\($0.isDone)" } ?? "unchanged"
-            Logger.tasks.error("update failed id=\(task.id.uuidString, privacy: .public), rolled back to \(target, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            showBanner(for: error)
-            return false
+            return .failure(error)
         }
-    }
-
-    func toggleDone(_ task: TaskItem) async {
-        var updated = self.task(id: task.id) ?? task
-        updated.isDone.toggle()
-        await update(updated)
     }
 
     func delete(_ task: TaskItem) async {
@@ -261,12 +285,23 @@ final class TaskListViewModel {
             Logger.tasks.info("cancellation, no banner")
             return
         }
-        mutationError = message(for: error)
+        mutationError = ErrorBanner(message: message(for: error))
     }
 
     private func noteMutation(_ id: TaskItem.ID) {
         mutationCount += 1
-        lastMutation[id] = mutationCount
+        if fetchesInFlight > 0 { lastMutation[id] = mutationCount }
+    }
+
+    private func beginFetch() -> Int {
+        fetchesInFlight += 1
+        return mutationCount
+    }
+
+    // Any later fetch starts past every recorded count, and pending ids win in adopt() on their own.
+    private func endFetch() {
+        fetchesInFlight -= 1
+        if fetchesInFlight == 0 { lastMutation.removeAll() }
     }
 
     // Looked up by id each time: other mutations may have shifted indices while a request was in flight.

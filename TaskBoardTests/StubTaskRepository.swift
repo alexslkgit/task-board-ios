@@ -94,3 +94,34 @@ actor StubTaskAPI: TaskAPI {
         tasks.removeAll { $0.id == id }
     }
 }
+
+/// API double whose deletes wait for `releaseDelete()` and then fail, so other writes can queue behind one.
+actor FailingDeleteAPI: TaskAPI {
+    private var tasks: [TaskItem]
+    private let gate: AsyncStream<Void>
+    private let gateContinuation: AsyncStream<Void>.Continuation
+
+    init(tasks: [TaskItem]) {
+        self.tasks = tasks
+        (gate, gateContinuation) = AsyncStream.makeStream()
+    }
+
+    nonisolated func releaseDelete() { gateContinuation.yield() }
+
+    func fetchTasks() async throws -> [TaskItem] { tasks }
+
+    func create(_ task: TaskItem) async throws -> TaskItem {
+        if let i = tasks.firstIndex(where: { $0.id == task.id }) { tasks[i] = task } else { tasks.append(task) }
+        return task
+    }
+
+    func update(_ task: TaskItem) async throws -> TaskItem {
+        if let i = tasks.firstIndex(where: { $0.id == task.id }) { tasks[i] = task }
+        return task
+    }
+
+    func delete(id: TaskItem.ID) async throws {
+        for await _ in gate { break }
+        throw TaskAPIError.network
+    }
+}

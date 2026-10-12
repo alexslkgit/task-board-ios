@@ -88,4 +88,10 @@ struct SeedTests {
         #expect(Set(seed.map(\.id)).count == seed.count)
         #expect(seed.filter { $0.dueDate != nil }.count == 2)
     }
+
+    @Test func seedDueDatesAreStartOfDay() {
+        let dueDates = TaskItem.seed.compactMap(\.dueDate)
+        #expect(!dueDates.isEmpty)
+        #expect(dueDates.allSatisfy { Calendar.current.startOfDay(for: $0) == $0 })
+    }
 }

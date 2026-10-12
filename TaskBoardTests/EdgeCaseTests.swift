@@ -45,7 +45,6 @@ actor DelayedRepository: TaskRepository {
 
 @MainActor
 struct EdgeCaseTests {
-    // R13
     @Test func refreshFailureKeepsLoadedList() async {
         let items = [TaskItem(title: "A"), TaskItem(title: "B")]
         let stub = StubTaskRepository(tasks: items)
@@ -58,7 +57,6 @@ struct EdgeCaseTests {
         #expect(vm.mutationError != nil)
     }
 
-    // R14a
     @Test func concurrentTogglesBothFailRestoreOriginal() async {
         let item = TaskItem(title: "A", isDone: false)
         let repo = DelayedRepository(tasks: [item])
@@ -72,7 +70,6 @@ struct EdgeCaseTests {
         #expect(vm.mutationError != nil)
     }
 
-    // R14b
     @Test func concurrentTogglesBothSucceedEndAtOriginalAndMatchRepository() async {
         let item = TaskItem(title: "A", isDone: false)
         let repo = DelayedRepository(tasks: [item])
@@ -86,7 +83,6 @@ struct EdgeCaseTests {
         #expect(stored?.isDone == vm.task(id: item.id)?.isDone)
     }
 
-    // R17
     @Test func undoDeleteFailureDoesNotDuplicateAndRestoresPending() async {
         let item = TaskItem(title: "A")
         let stub = StubTaskRepository(tasks: [item])
@@ -101,19 +97,30 @@ struct EdgeCaseTests {
         #expect(vm.mutationError != nil)
     }
 
-    // Extra
-    @Test func undoDeleteWhileAddInFlightHasNoDuplicateIds() async {
+    @Test func undoDeleteWhileAddInFlightHasNoDuplicateIds() async throws {
         let a = TaskItem(title: "A")
         let b = TaskItem(title: "B")
-        let repo = DelayedRepository(tasks: [a, b])
+        let api = FailingDeleteAPI(tasks: [a, b])
+        let repo = DefaultTaskRepository(api: api)
         let vm = TaskListViewModel(repository: repo)
         await vm.load()
-        await vm.delete(a)
-        async let undo: Void = vm.undoDelete()
-        async let added: Bool = vm.add(title: "C", notes: "", priority: .low)
-        _ = await (undo, added)
+
+        let deleting = Task { await vm.delete(a) }
+        while vm.recentlyDeleted?.id != a.id { await Task.yield() }
+        let undoing = Task { await vm.undoDelete() }
+        let adding = Task { await vm.add(title: "C", notes: "", priority: .low) }
+        while vm.recentlyDeleted != nil || !vm.tasks.contains(where: { $0.title == "C" }) { await Task.yield() }
+        api.releaseDelete()
+        _ = await (deleting.value, undoing.value, adding.value)
+
         let ids = vm.tasks.map(\.id)
         #expect(Set(ids).count == ids.count)
         #expect(vm.tasks.contains { $0.id == a.id })
+        let cachedIDs = try await repo.loadTasks(forceRefresh: false).map(\.id)
+        #expect(Set(cachedIDs).count == cachedIDs.count)
+        let reloaded = TaskListViewModel(repository: repo)
+        await reloaded.load()
+        let reloadedIDs = reloaded.tasks.map(\.id)
+        #expect(Set(reloadedIDs).count == reloadedIDs.count)
     }
 }

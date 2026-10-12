@@ -6,14 +6,16 @@ import Testing
 actor ScriptedRepository: TaskRepository {
     var tasks: [TaskItem]
     var failingUpdateCalls: Set<Int>
+    let failsDeletes: Bool
     let writeDelay: Duration
     let readDelay: Duration
     private var updateCalls = 0
 
-    init(tasks: [TaskItem], failingUpdateCalls: Set<Int> = [],
+    init(tasks: [TaskItem], failingUpdateCalls: Set<Int> = [], failsDeletes: Bool = false,
          writeDelay: Duration = .milliseconds(50), readDelay: Duration = .milliseconds(50)) {
         self.tasks = tasks
         self.failingUpdateCalls = failingUpdateCalls
+        self.failsDeletes = failsDeletes
         self.writeDelay = writeDelay
         self.readDelay = readDelay
     }
@@ -41,36 +43,13 @@ actor ScriptedRepository: TaskRepository {
 
     func delete(id: TaskItem.ID) async throws {
         try await Task.sleep(for: writeDelay)
+        if failsDeletes { throw TaskAPIError.network }
         tasks.removeAll { $0.id == id }
     }
 }
 
 @MainActor
 struct WriteSerializationTests {
-    @Test func dismissUndoClearsOnlyMatchingId() async {
-        let a = TaskItem(title: "A")
-        let b = TaskItem(title: "B")
-        let vm = TaskListViewModel(repository: StubTaskRepository(tasks: [a, b]))
-        await vm.load()
-        await vm.delete(a)
-        await vm.delete(b)
-        #expect(vm.recentlyDeleted?.id == b.id)
-        vm.dismissUndo(for: a.id)
-        #expect(vm.recentlyDeleted?.id == b.id)
-        vm.dismissUndo(for: b.id)
-        #expect(vm.recentlyDeleted == nil)
-    }
-
-    @Test func mockAPIWriteFailureRateOnlyAffectsWrites() async throws {
-        let item = TaskItem(title: "A")
-        let api = MockTaskAPI(seed: [item], readLatency: 0...0, writeLatency: 0...0,
-                              failureRate: 0, writeFailureRate: 1)
-        #expect(try await api.fetchTasks() == [item])
-        await #expect(throws: TaskAPIError.self) { try await api.create(TaskItem(title: "B")) }
-        await #expect(throws: TaskAPIError.self) { try await api.update(item) }
-        await #expect(throws: TaskAPIError.self) { try await api.delete(id: item.id) }
-    }
-
     @Test func toggleBurstWithFailingMiddleEndsAtLastIntent() async {
         let item = TaskItem(title: "A", isDone: false)
         let repo = ScriptedRepository(tasks: [item], failingUpdateCalls: [2])
@@ -132,5 +111,25 @@ struct WriteSerializationTests {
         #expect(vm.mutationError == nil)
         let stored = await repo.tasks.contains { $0.id == item.id }
         #expect(!stored)
+    }
+
+    // The deleted row holds the optimistic toggle; a failed delete must restore what the server last confirmed.
+    @Test(arguments: [true, false])
+    func failedDeleteWhileUpdatePendingRestoresConfirmedBaseline(updateFails: Bool) async {
+        let item = TaskItem(title: "A", isDone: false)
+        let repo = ScriptedRepository(tasks: [item], failingUpdateCalls: updateFails ? [1] : [], failsDeletes: true,
+                                      writeDelay: .milliseconds(80))
+        let vm = TaskListViewModel(repository: repo)
+        await vm.load()
+        let toggling = Task { await vm.toggleDone(item) }
+        while vm.task(id: item.id)?.isDone != true { await Task.yield() }
+        await vm.delete(item)
+        await toggling.value
+
+        let stored = await repo.tasks.first { $0.id == item.id }
+        #expect(vm.task(id: item.id)?.isDone == !updateFails)
+        #expect(vm.task(id: item.id) == stored)
+        #expect(vm.recentlyDeleted == nil)
+        #expect(vm.mutationError != nil)
     }
 }

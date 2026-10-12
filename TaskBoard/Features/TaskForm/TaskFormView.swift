@@ -3,6 +3,7 @@ import SwiftUI
 
 private enum Constants {
     enum Layout {
+        static let titleLines = 1...5
         static let notesLines = 3...8
         static let saveErrorID = "saveError"
     }
@@ -28,6 +29,7 @@ private enum Constants {
         static let discard: LocalizedStringKey = "Discard changes"
         static let keepEditing: LocalizedStringKey = "Keep editing"
         static let save: LocalizedStringKey = "Save"
+        static let taskGone = String(localized: "This task no longer exists.")
     }
 }
 
@@ -39,9 +41,11 @@ struct TaskFormView: View {
 
     let viewModel: TaskListViewModel
     let mode: Mode
-    private let baseline: TaskItem
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    // Captured once: the caller passes the live row, which can change while the form is open.
+    @State private var baseline: TaskItem
     @State private var title: String
     @State private var notes: String
     @State private var priority: Priority
@@ -60,7 +64,7 @@ struct TaskFormView: View {
         case .add: base = TaskItem(title: "")
         case .edit(let task): base = task
         }
-        baseline = base
+        _baseline = State(initialValue: base)
         _title = State(initialValue: base.title)
         _notes = State(initialValue: base.notes)
         _priority = State(initialValue: base.priority)
@@ -109,6 +113,13 @@ struct TaskFormView: View {
         }
         .navigationTitle(isEditing ? Constants.Strings.editTitle : Constants.Strings.newTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .alert(Constants.Strings.discardPrompt, isPresented: $showingDiscard) {
+            Button(Constants.Strings.discard, role: .destructive) {
+                Logger.ui.info("Changes discarded")
+                dismiss()
+            }
+            Button(Constants.Strings.keepEditing, role: .cancel) {}
+        }
     }
 
     private var form: some View {
@@ -122,15 +133,19 @@ struct TaskFormView: View {
                     .id(Constants.Layout.saveErrorID)
                 }
                 Section {
-                    TextField(Constants.Strings.title, text: $title)
+                    TextField(Constants.Strings.title, text: $title, axis: .vertical)
+                        .lineLimit(Constants.Layout.titleLines)
+                        // A vertical field turns Return into a newline; titles stay single-paragraph.
+                        .onChange(of: title) { _, newValue in
+                            if newValue.contains(where: \.isNewline) {
+                                title = newValue.filter { !$0.isNewline }
+                            }
+                        }
                     TextField(Constants.Strings.notes, text: $notes, axis: .vertical)
                         .lineLimit(Constants.Layout.notesLines)
                 }
-                Section {
-                    Picker(Constants.Strings.priority, selection: $priority) {
-                        ForEach(Priority.allCases) { Text($0.title).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
+                Section(Constants.Strings.priority) {
+                    priorityPicker
                 }
                 Section {
                     Toggle(Constants.Strings.dueDate, isOn: $hasDueDate.animation())
@@ -157,15 +172,21 @@ struct TaskFormView: View {
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button(Constants.Strings.save, action: save)
-                    .disabled(trimmedTitle.isEmpty || isSaving)
+                    .disabled(trimmedTitle.isEmpty || isSaving || (isEditing && !hasChanges))
             }
         }
-        .confirmationDialog(Constants.Strings.discardPrompt, isPresented: $showingDiscard, titleVisibility: .visible) {
-            Button(Constants.Strings.discard, role: .destructive) {
-                Logger.ui.info("Changes discarded")
-                dismiss()
-            }
-            Button(Constants.Strings.keepEditing, role: .cancel) {}
+    }
+
+    // Segments truncate at accessibility sizes; the inline list wraps instead.
+    @ViewBuilder private var priorityPicker: some View {
+        let picker = Picker(Constants.Strings.priority, selection: $priority) {
+            ForEach(Priority.allCases) { Text($0.title).tag($0) }
+        }
+        .labelsHidden()
+        if dynamicTypeSize.isAccessibilitySize {
+            picker.pickerStyle(.inline)
+        } else {
+            picker.pickerStyle(.segmented)
         }
     }
 
@@ -183,26 +204,30 @@ struct TaskFormView: View {
         isSaving = true
         saveError = nil
         Task {
-            let saved: Bool
-            if var task = editedTask {
-                task.title = trimmedTitle
-                task.notes = notes
-                task.priority = priority
-                task.isDone = isDone
-                task.dueDate = effectiveDueDate
-                saved = await viewModel.update(task)
-            } else {
-                saved = await viewModel.add(title: trimmedTitle, notes: notes, priority: priority, dueDate: effectiveDueDate)
+            let result: TaskListViewModel.SaveResult
+            switch mode {
+            case .add:
+                result = await viewModel.add(title: trimmedTitle, notes: notes, priority: priority, dueDate: effectiveDueDate)
+            case .edit:
+                if var task = editedTask {
+                    task.title = trimmedTitle
+                    task.notes = notes
+                    task.priority = priority
+                    task.isDone = isDone
+                    task.dueDate = effectiveDueDate
+                    result = await viewModel.update(task)
+                } else {
+                    result = .failed(Constants.Strings.taskGone)
+                }
             }
             isSaving = false
-            if saved {
+            switch result {
+            case .saved:
                 dismiss()
-            } else {
-                let message = viewModel.mutationError
-                viewModel.mutationError = nil
+            case .failed(let message):
                 saveError = message
                 Logger.ui.info("Save error shown")
-                if let message { AccessibilityNotification.Announcement(message).post() }
+                AccessibilityNotification.Announcement(message).post()
             }
         }
     }

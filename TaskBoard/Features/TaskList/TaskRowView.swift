@@ -4,12 +4,12 @@ private enum Constants {
     enum Layout {
         static let spacing: CGFloat = 12
         static let largeTextSpacing: CGFloat = 8
+        static let metaSpacing: CGFloat = 6
         static let textSpacing: CGFloat = 2
-        static let spacerMinLength: CGFloat = 8
-        static let titleLines = 2
-        static let notesLines = 1
-        static let largeTextNotesLines = 2
+        static let titleLines = 3
+        static let notesLines = 2
         static let toggleFont = Font.title2
+        static let largeTextToggleFont = Font.system(size: 20)
         static let notesFont = Font.subheadline
     }
 
@@ -37,46 +37,38 @@ struct TaskRowView: View {
     private var toggleButton: some View {
         Button(action: onToggle) {
             Image(systemName: task.isDone ? Constants.Symbols.done : Constants.Symbols.notDone)
-                .font(Constants.Layout.toggleFont)
+                .font(dynamicTypeSize.isAccessibilitySize ? Constants.Layout.largeTextToggleFont : Constants.Layout.toggleFont)
                 .foregroundStyle(task.isDone ? Color.accentColor : .secondary)
         }
         .buttonStyle(.borderless)
         .accessibilityHidden(true)
     }
 
-    private func texts(titleLimit: Int?, notesLimit: Int) -> some View {
-        VStack(alignment: .leading, spacing: Constants.Layout.textSpacing) {
-            Text(task.title)
-                .lineLimit(titleLimit)
-                .strikethrough(task.isDone)
-                .foregroundStyle(task.isDone ? .secondary : .primary)
-            if !task.notes.isEmpty {
-                Text(task.notes)
-                    .font(Constants.Layout.notesFont)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(notesLimit)
-            }
+    private var meta: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Constants.Layout.metaSpacing))
+            : AnyLayout(HStackLayout(spacing: Constants.Layout.metaSpacing))
+        return layout {
+            PriorityBadge(priority: task.priority)
             DueDateLabel(task: task)
         }
     }
 
     var body: some View {
-        Group {
-            if dynamicTypeSize.isAccessibilitySize {
-                HStack(alignment: .top, spacing: Constants.Layout.spacing) {
-                    toggleButton
-                    VStack(alignment: .leading, spacing: Constants.Layout.largeTextSpacing) {
-                        texts(titleLimit: nil, notesLimit: Constants.Layout.largeTextNotesLines)
-                        PriorityBadge(priority: task.priority)
-                    }
+        HStack(alignment: .top, spacing: dynamicTypeSize.isAccessibilitySize ? Constants.Layout.largeTextSpacing : Constants.Layout.spacing) {
+            toggleButton
+            VStack(alignment: .leading, spacing: Constants.Layout.textSpacing) {
+                Text(task.title)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : Constants.Layout.titleLines)
+                    .strikethrough(task.isDone)
+                    .foregroundStyle(task.isDone ? .secondary : .primary)
+                if !task.notes.isEmpty {
+                    Text(task.notes)
+                        .font(Constants.Layout.notesFont)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(Constants.Layout.notesLines)
                 }
-            } else {
-                HStack(spacing: Constants.Layout.spacing) {
-                    toggleButton
-                    texts(titleLimit: Constants.Layout.titleLines, notesLimit: Constants.Layout.notesLines)
-                    Spacer(minLength: Constants.Layout.spacerMinLength)
-                    PriorityBadge(priority: task.priority)
-                }
+                meta.padding(.top, Constants.Layout.metaSpacing)
             }
         }
         .accessibilityElement(children: .combine)

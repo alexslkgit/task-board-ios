@@ -87,12 +87,11 @@ actor MockTaskAPI: TaskAPI {
 
 nonisolated private enum SeedConstants {
     static let spacing: TimeInterval = 60
-    static let day: TimeInterval = 24 * 60 * 60
 }
 
 nonisolated extension TaskItem {
     static let seed: [TaskItem] = {
-        typealias Entry = (title: String, notes: String, priority: Priority, isDone: Bool, dueInDays: Double?)
+        typealias Entry = (title: String, notes: String, priority: Priority, isDone: Bool, dueInDays: Int?)
         let entries: [Entry] = [
             ("Renew domain registration", "Expires end of month", .high, false, 3),
             ("Reply to design feedback", "", .medium, false, nil),
@@ -100,6 +99,8 @@ nonisolated extension TaskItem {
             ("Migrate the analytics pipeline to the new warehouse and validate dashboards", "Long one — check layout", .medium, false, nil),
         ]
         let now = Date.now
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now)
         // In the past and in index order, so tasks created later always sort after the seed.
         return entries.enumerated().map { index, entry in
             TaskItem(
@@ -108,7 +109,7 @@ nonisolated extension TaskItem {
                 priority: entry.priority,
                 isDone: entry.isDone,
                 createdAt: now.addingTimeInterval(-Double(entries.count - index) * SeedConstants.spacing),
-                dueDate: entry.dueInDays.map { now.addingTimeInterval($0 * SeedConstants.day) }
+                dueDate: entry.dueInDays.flatMap { calendar.date(byAdding: .day, value: $0, to: today) }
             )
         }
     }()

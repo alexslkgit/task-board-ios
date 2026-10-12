@@ -69,6 +69,19 @@ struct DefaultTaskRepositoryTests {
         #expect(await api.fetchCount == 1)
     }
 
+    @Test func addOfCachedTaskReplacesItInsteadOfDuplicating() async throws {
+        let item = TaskItem(title: "A")
+        let api = StubTaskAPI(tasks: [item])
+        let repo = DefaultTaskRepository(api: api)
+        _ = try await repo.loadTasks(forceRefresh: false)
+
+        var recreated = item
+        recreated.title = "A again"
+        _ = try await repo.add(recreated)
+
+        #expect(try await repo.loadTasks(forceRefresh: false) == [recreated])
+    }
+
     @Test func staleFetchDoesNotOverwriteCacheAfterWrite() async throws {
         let item = TaskItem(title: "A")
         let added = TaskItem(title: "B")

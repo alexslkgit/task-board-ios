@@ -2,9 +2,15 @@ import SwiftUI
 
 private enum Constants {
     enum Layout {
-        static let badgeHorizontalPadding: CGFloat = 8
         static let badgeVerticalPadding: CGFloat = 3
         static let badgeOpacity = 0.15
+        static let badgeDarkOpacity = 0.25
+        static let badgeIconSpacing: CGFloat = 4
+        static let badgeLightMix = 0.45
+        static let badgeDarkMix = 0.35
+        static let badgeWidth: CGFloat = 80
+        static let badgeMaxWidth: CGFloat = 190
+        static let badgeMinScale = 0.7
         static let badgeFont = Font.caption2.weight(.semibold)
         static let dueFont = Font.caption
     }
@@ -50,16 +56,34 @@ extension TaskItem {
 struct PriorityBadge: View {
     let priority: Priority
 
+    @Environment(\.colorScheme) private var colorScheme
+    @ScaledMetric(relativeTo: .caption2) private var width = Constants.Layout.badgeWidth
+
+    private var isDark: Bool { colorScheme == .dark }
+
+    private var foreground: Color {
+        isDark
+            ? priority.tint.mix(with: .white, by: Constants.Layout.badgeDarkMix)
+            : priority.tint.mix(with: .black, by: Constants.Layout.badgeLightMix)
+    }
+
     var body: some View {
-        Label(priority.title, systemImage: priority.symbol)
-            .labelStyle(.titleAndIcon)
-            .font(Constants.Layout.badgeFont)
-            .padding(.horizontal, Constants.Layout.badgeHorizontalPadding)
-            .padding(.vertical, Constants.Layout.badgeVerticalPadding)
-            .foregroundStyle(priority.tint)
-            .background(priority.tint.opacity(Constants.Layout.badgeOpacity), in: .capsule)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Constants.Strings.priority(priority.title))
+        HStack(spacing: Constants.Layout.badgeIconSpacing) {
+            Image(systemName: priority.symbol)
+            Text(priority.title)
+        }
+        .font(Constants.Layout.badgeFont)
+        .lineLimit(1)
+        .minimumScaleFactor(Constants.Layout.badgeMinScale)
+        .frame(width: min(width, Constants.Layout.badgeMaxWidth))
+        .padding(.vertical, Constants.Layout.badgeVerticalPadding)
+        .foregroundStyle(foreground)
+        .background(
+            priority.tint.opacity(isDark ? Constants.Layout.badgeDarkOpacity : Constants.Layout.badgeOpacity),
+            in: .capsule
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Constants.Strings.priority(priority.title))
     }
 }
 

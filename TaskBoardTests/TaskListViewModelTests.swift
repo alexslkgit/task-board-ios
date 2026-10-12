@@ -77,11 +77,96 @@ struct TaskListViewModelTests {
         #expect(vm.recentlyDeleted == nil)
     }
 
-    @Test func failedAddReportsFailure() async {
+    @Test func failedAddReportsFailureToCallerOnly() async {
         let vm = TaskListViewModel(repository: StubTaskRepository(shouldFail: true))
-        let saved = await vm.add(title: "New", notes: "", priority: .high)
-        #expect(saved == false)
+        let result = await vm.add(title: "New", notes: "", priority: .high)
+        #expect(result == .failed(TaskAPIError.network.errorDescription ?? ""))
         #expect(vm.tasks.isEmpty)
+        #expect(vm.mutationError == nil)
+    }
+
+    @Test func failedUpdateReportsFailureToCallerOnly() async {
+        let item = TaskItem(title: "A")
+        let stub = StubTaskRepository(tasks: [item])
+        let vm = TaskListViewModel(repository: stub)
+        await vm.load()
+        await stub.setShouldFail(true)
+        var edited = item
+        edited.title = "Edited"
+
+        let result = await vm.update(edited)
+
+        #expect(result == .failed(TaskAPIError.network.errorDescription ?? ""))
+        #expect(vm.task(id: item.id) == item)
+        #expect(vm.mutationError == nil)
+    }
+
+    @Test func updateOfMissingRowFailsWithoutRecreatingIt() async {
+        let stub = StubTaskRepository()
+        let vm = TaskListViewModel(repository: stub)
+        await vm.load()
+
+        let result = await vm.update(TaskItem(title: "Ghost"))
+
+        #expect(result == .failed(TaskAPIError.notFound.errorDescription ?? ""))
+        #expect(vm.tasks.isEmpty)
+        #expect(await stub.tasks.isEmpty)
+    }
+
+    @Test func repeatedIdenticalFailuresGetNewBannerIDs() async throws {
+        let item = TaskItem(title: "A")
+        let stub = StubTaskRepository(tasks: [item])
+        let vm = TaskListViewModel(repository: stub)
+        await vm.load()
+        await stub.setShouldFail(true)
+
+        await vm.toggleDone(item)
+        let first = try #require(vm.mutationError)
+        await vm.toggleDone(item)
+        let second = try #require(vm.mutationError)
+
+        #expect(first.message == second.message)
+        #expect(first.id != second.id)
+    }
+
+    @Test func loadIsNoOpOnceLoaded() async {
+        let first = TaskItem(title: "First")
+        let stub = StubTaskRepository(tasks: [first])
+        let vm = TaskListViewModel(repository: stub)
+        await vm.load()
+        await stub.setTasks([TaskItem(title: "Second")])
+
+        await vm.load()
+
+        #expect(vm.tasks == [first])
+        #expect(vm.loadState == .loaded)
+    }
+
+    @Test func loadRetriesAfterFailure() async {
+        let item = TaskItem(title: "A")
+        let stub = StubTaskRepository(tasks: [item], shouldFail: true)
+        let vm = TaskListViewModel(repository: stub)
+        await vm.load()
+        await stub.setShouldFail(false)
+
+        await vm.load()
+
+        #expect(vm.tasks == [item])
+        #expect(vm.loadState == .loaded)
+    }
+
+    @Test func dismissUndoClearsOnlyMatchingId() async {
+        let a = TaskItem(title: "A")
+        let b = TaskItem(title: "B")
+        let vm = TaskListViewModel(repository: StubTaskRepository(tasks: [a, b]))
+        await vm.load()
+        await vm.delete(a)
+        await vm.delete(b)
+        #expect(vm.recentlyDeleted?.id == b.id)
+        vm.dismissUndo(for: a.id)
+        #expect(vm.recentlyDeleted?.id == b.id)
+        vm.dismissUndo(for: b.id)
+        #expect(vm.recentlyDeleted == nil)
     }
 
     @Test func searchIsCaseInsensitiveAndPrioritySortPutsHighFirst() async {
@@ -147,10 +232,10 @@ struct TaskListViewModelTests {
         edited.title = "Edited title"
         edited.dueDate = Date(timeIntervalSince1970: 1_000)
 
-        let saved = await vm.update(edited)
+        let result = await vm.update(edited)
         await vm.refresh()
 
-        #expect(saved)
+        #expect(result == .saved)
         #expect(vm.task(id: edited.id) == edited)
         let reloaded = TaskListViewModel(repository: repository)
         await reloaded.load()
@@ -163,9 +248,9 @@ struct TaskListViewModelTests {
         await vm.load()
         let due = Date(timeIntervalSince1970: 2_000)
 
-        let saved = await vm.add(title: "Pay rent", notes: "", priority: .high, dueDate: due)
+        let result = await vm.add(title: "Pay rent", notes: "", priority: .high, dueDate: due)
 
-        #expect(saved)
+        #expect(result == .saved)
         #expect(vm.tasks.first?.dueDate == due)
         #expect(await stub.tasks.first?.dueDate == due)
     }

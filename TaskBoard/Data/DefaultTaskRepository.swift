@@ -37,7 +37,12 @@ actor DefaultTaskRepository: TaskRepository {
     func add(_ task: TaskItem) async throws -> TaskItem {
         let created = try await logged("add", task.id) { try await api.create(task) }
         generation += 1
-        cache?.append(created)
+        // Upsert, matching the API: an undo can re-create a row whose delete failed and is still cached.
+        if let index = cache?.firstIndex(where: { $0.id == created.id }) {
+            cache?[index] = created
+        } else {
+            cache?.append(created)
+        }
         return created
     }
 
