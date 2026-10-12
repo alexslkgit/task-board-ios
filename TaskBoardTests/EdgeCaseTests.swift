@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import MyApp
+@testable import TaskBoard
 
 /// Repository double with a per-call delay so mutations can overlap.
 actor DelayedRepository: TaskRepository {

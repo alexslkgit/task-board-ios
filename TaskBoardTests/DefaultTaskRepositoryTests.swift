@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import MyApp
+@testable import TaskBoard
 
 struct DefaultTaskRepositoryTests {
     @Test func failedUpdateLeavesCacheUnchanged() async throws {

@@ -15,9 +15,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "000000000000000100000000"
-               BuildableName = "MyApp.app"
-               BlueprintName = "MyApp"
-               ReferencedContainer = "container:Untitled Project 2.xcodeproj">
+               BuildableName = "TaskBoard.app"
+               BlueprintName = "TaskBoard"
+               ReferencedContainer = "container:TaskBoard.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -34,9 +34,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "000000000000000200000000"
-               BuildableName = "MyAppTests.xctest"
-               BlueprintName = "MyAppTests"
-               ReferencedContainer = "container:Untitled Project 2.xcodeproj">
+               BuildableName = "TaskBoardTests.xctest"
+               BlueprintName = "TaskBoardTests"
+               ReferencedContainer = "container:TaskBoard.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -56,9 +56,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "000000000000000100000000"
-            BuildableName = "MyApp.app"
-            BlueprintName = "MyApp"
-            ReferencedContainer = "container:Untitled Project 2.xcodeproj">
+            BuildableName = "TaskBoard.app"
+            BlueprintName = "TaskBoard"
+            ReferencedContainer = "container:TaskBoard.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>

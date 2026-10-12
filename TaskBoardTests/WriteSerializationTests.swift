@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import MyApp
+@testable import TaskBoard
 
 /// Repository double: the Nth update call fails, reads return a snapshot taken at call time.
 actor ScriptedRepository: TaskRepository {

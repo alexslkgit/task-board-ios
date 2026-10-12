@@ -1,5 +1,5 @@
 import Foundation
-@testable import MyApp
+@testable import TaskBoard
 
 actor StubTaskRepository: TaskRepository {
     var tasks: [TaskItem]
