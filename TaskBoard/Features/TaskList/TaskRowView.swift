@@ -2,14 +2,13 @@ import SwiftUI
 
 private enum Constants {
     enum Layout {
-        static let spacing: CGFloat = 12
         static let largeTextSpacing: CGFloat = 8
         static let metaSpacing: CGFloat = 6
         static let textSpacing: CGFloat = 2
-        static let titleLines = 3
+        static let titleLines = 4
         static let notesLines = 2
-        static let toggleFont = Font.title2
-        static let largeTextToggleFont = Font.system(size: 20)
+        static let toggleSize: CGFloat = 22
+        static let hitTarget: CGFloat = 44
         static let notesFont = Font.subheadline
     }
 
@@ -33,42 +32,86 @@ struct TaskRowView: View {
     let onDelete: () -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .title2) private var toggleSize = Constants.Layout.toggleSize
+
+    private var isLargeText: Bool { dynamicTypeSize.isAccessibilitySize }
 
     private var toggleButton: some View {
         Button(action: onToggle) {
             Image(systemName: task.isDone ? Constants.Symbols.done : Constants.Symbols.notDone)
-                .font(dynamicTypeSize.isAccessibilitySize ? Constants.Layout.largeTextToggleFont : Constants.Layout.toggleFont)
+                .font(.system(size: toggleSize))
                 .foregroundStyle(task.isDone ? Color.accentColor : .secondary)
+                .frame(
+                    minWidth: Constants.Layout.hitTarget,
+                    minHeight: Constants.Layout.hitTarget,
+                    alignment: isLargeText ? .leading : .topLeading
+                )
+                .contentShape(.rect)
         }
         .buttonStyle(.borderless)
         .accessibilityHidden(true)
     }
 
-    private var meta: some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Constants.Layout.metaSpacing))
-            : AnyLayout(HStackLayout(spacing: Constants.Layout.metaSpacing))
-        return layout {
-            PriorityBadge(priority: task.priority)
-            DueDateLabel(task: task)
+    private var titleText: some View {
+        Text(task.title)
+            .lineLimit(isLargeText ? nil : Constants.Layout.titleLines)
+            .strikethrough(task.isDone)
+            .foregroundStyle(task.isDone ? .secondary : .primary)
+    }
+
+    @ViewBuilder private var notesText: some View {
+        if !task.notes.isEmpty {
+            Text(task.notes)
+                .font(Constants.Layout.notesFont)
+                .foregroundStyle(.secondary)
+                .lineLimit(isLargeText ? nil : Constants.Layout.notesLines)
+        }
+    }
+
+    private var regularLayout: some View {
+        // The hit target's slack doubles as the gap before the title.
+        HStack(alignment: .top, spacing: 0) {
+            toggleButton
+            VStack(alignment: .leading, spacing: Constants.Layout.textSpacing) {
+                titleText
+                notesText
+                HStack(spacing: Constants.Layout.metaSpacing) {
+                    PriorityBadge(priority: task.priority)
+                    DueDateLabel(task: task)
+                }
+                .padding(.top, Constants.Layout.metaSpacing)
+            }
+        }
+    }
+
+    // Controls share one line so the title and notes get the full row width.
+    private var largeTextLayout: some View {
+        VStack(alignment: .leading, spacing: Constants.Layout.largeTextSpacing) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Constants.Layout.largeTextSpacing) {
+                    toggleButton
+                    PriorityBadge(priority: task.priority)
+                    DueDateLabel(task: task)
+                }
+                VStack(alignment: .leading, spacing: Constants.Layout.metaSpacing) {
+                    HStack(spacing: Constants.Layout.largeTextSpacing) {
+                        toggleButton
+                        PriorityBadge(priority: task.priority)
+                    }
+                    DueDateLabel(task: task).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            titleText
+            notesText
         }
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: dynamicTypeSize.isAccessibilitySize ? Constants.Layout.largeTextSpacing : Constants.Layout.spacing) {
-            toggleButton
-            VStack(alignment: .leading, spacing: Constants.Layout.textSpacing) {
-                Text(task.title)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : Constants.Layout.titleLines)
-                    .strikethrough(task.isDone)
-                    .foregroundStyle(task.isDone ? .secondary : .primary)
-                if !task.notes.isEmpty {
-                    Text(task.notes)
-                        .font(Constants.Layout.notesFont)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(Constants.Layout.notesLines)
-                }
-                meta.padding(.top, Constants.Layout.metaSpacing)
+        Group {
+            if isLargeText {
+                largeTextLayout
+            } else {
+                regularLayout
             }
         }
         .accessibilityElement(children: .combine)

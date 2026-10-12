@@ -43,3 +43,21 @@ nonisolated struct TaskItem: Identifiable, Hashable, Codable, Sendable {
         self.dueDate = dueDate
     }
 }
+
+nonisolated extension TaskItem {
+    /// Copies onto `self` only the fields `edited` changed relative to `baseline`, so concurrent changes to the rest survive.
+    func applying(changesFrom baseline: TaskItem, to edited: TaskItem) -> TaskItem {
+        var result = self
+        if edited.title != baseline.title { result.title = edited.title }
+        if edited.notes != baseline.notes { result.notes = edited.notes }
+        if edited.priority != baseline.priority { result.priority = edited.priority }
+        if edited.isDone != baseline.isDone { result.isDone = edited.isDone }
+        if edited.dueDate != baseline.dueDate { result.dueDate = edited.dueDate }
+        return result
+    }
+
+    /// A title is one paragraph: each run of line breaks becomes a single space, so words never get glued.
+    static func singleLineTitle(_ text: String) -> String {
+        text.replacing(#/[ \t]*\R+[ \t]*/#, with: " ")
+    }
+}

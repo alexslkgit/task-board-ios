@@ -35,22 +35,25 @@ private enum Constants {
 struct TaskListView: View {
     @Bindable var viewModel: TaskListViewModel
     @State private var showingAdd = false
+    @State private var path: [TaskItem.ID] = []
     @SceneStorage("sortOrder") private var storedSortOrder = TaskListViewModel.SortOrder.created
     @SceneStorage("searchText") private var storedSearchText = ""
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             content
                 .navigationTitle(Constants.Strings.title)
                 .navigationDestination(for: TaskItem.ID.self) { id in
                     TaskDetailView(viewModel: viewModel, taskID: id)
                 }
                 .toolbar {
+                    // The iOS 26 glass toolbar draws glyphs monochrome unless tinted explicitly.
                     if !viewModel.tasks.isEmpty {
-                        ToolbarItem(placement: .topBarLeading) { sortMenu }
+                        ToolbarItem(placement: .topBarLeading) { sortMenu.tint(.accentColor) }
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button(Constants.Strings.addTask, systemImage: Constants.Symbols.add) { showingAdd = true }
+                            .tint(.accentColor)
                     }
                 }
                 .sheet(isPresented: $showingAdd) {
@@ -160,9 +163,9 @@ struct TaskListView: View {
         .refreshable { await viewModel.refresh() }
     }
 
-    /// From iOS 26 the search field floats at the bottom, exactly where the banners sit.
+    /// From iOS 26 the search field floats at the bottom of the list screen, exactly where the banners sit.
     private var searchClearance: CGFloat {
-        guard #available(iOS 26, *), !viewModel.tasks.isEmpty else { return 0 }
+        guard #available(iOS 26, *), path.isEmpty, !viewModel.tasks.isEmpty else { return 0 }
         return Constants.Layout.bottomSearchClearance
     }
 

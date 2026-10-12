@@ -95,3 +95,43 @@ struct SeedTests {
         #expect(dueDates.allSatisfy { Calendar.current.startOfDay(for: $0) == $0 })
     }
 }
+
+struct TaskItemTests {
+    @Test func applyingKeepsFieldsTheEditDidNotTouch() {
+        let baseline = TaskItem(title: "A", notes: "n", priority: .low, isDone: true)
+        var edited = baseline
+        edited.title = "A edited"
+        edited.priority = .high
+        var current = baseline
+        current.isDone = false  // a toggle that failed while the form was open
+        current.notes = "changed elsewhere"
+
+        let result = current.applying(changesFrom: baseline, to: edited)
+
+        #expect(result.title == "A edited")
+        #expect(result.priority == .high)
+        #expect(result.isDone == false)
+        #expect(result.notes == "changed elsewhere")
+        #expect(result.id == current.id)
+    }
+
+    @Test func applyingWritesEveryChangedField() {
+        let baseline = TaskItem(title: "A")
+        let edited = TaskItem(
+            id: baseline.id, title: "B", notes: "n", priority: .high, isDone: true,
+            createdAt: baseline.createdAt, dueDate: Date(timeIntervalSince1970: 0)
+        )
+        #expect(baseline.applying(changesFrom: baseline, to: edited) == edited)
+    }
+
+    @Test(arguments: [
+        ("Buy\nmilk", "Buy milk"),
+        ("Buy \n\n milk", "Buy milk"),
+        ("Buy\r\nmilk", "Buy milk"),
+        ("Buy  milk", "Buy  milk"),
+        ("Buy milk", "Buy milk"),
+    ])
+    func singleLineTitleReplacesLineBreaksWithOneSpace(input: String, expected: String) {
+        #expect(TaskItem.singleLineTitle(input) == expected)
+    }
+}

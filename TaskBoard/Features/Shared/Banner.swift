@@ -38,6 +38,7 @@ struct Banner<Action: View>: View {
     let systemImage: String
     let tint: Color
     @ViewBuilder let action: Action
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var content: some View {
         HStack(alignment: .firstTextBaseline, spacing: Constants.Layout.spacing) {
@@ -49,15 +50,19 @@ struct Banner<Action: View>: View {
     }
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: Constants.Layout.spacing) {
-                content
-                Spacer(minLength: 0)
-                action.fixedSize().layoutPriority(Constants.Layout.actionPriority)
-            }
-            VStack(alignment: .leading, spacing: Constants.Layout.stackedSpacing) {
-                content
-                action.fixedSize().frame(maxWidth: .infinity, alignment: .trailing)
+        // ViewThatFits would measure the message unwrapped and stack even short banners.
+        Group {
+            if typeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: Constants.Layout.stackedSpacing) {
+                    content
+                    action.fixedSize().frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            } else {
+                HStack(spacing: Constants.Layout.spacing) {
+                    content
+                    Spacer(minLength: 0)
+                    action.fixedSize().layoutPriority(Constants.Layout.actionPriority)
+                }
             }
         }
         .padding(.horizontal, Constants.Layout.horizontalPadding)
@@ -105,7 +110,7 @@ struct UndoBannerView: View {
                 onUndo()
             }
             .fontWeight(.semibold)
-            .frame(minHeight: Constants.Layout.hitTarget)
+            .frame(minWidth: Constants.Layout.hitTarget, minHeight: Constants.Layout.hitTarget)
             .contentShape(.rect)
         }
         .task(id: id) {
@@ -116,12 +121,6 @@ struct UndoBannerView: View {
             onExpire()
             Logger.ui.info("Undo banner auto-hidden")
         }
-    }
-}
-
-extension View {
-    func groupedBackground() -> some View {
-        background(Color(.systemGroupedBackground))
     }
 }
 

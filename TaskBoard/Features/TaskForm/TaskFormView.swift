@@ -6,16 +6,14 @@ private enum Constants {
         static let titleLines = 1...5
         static let notesLines = 3...8
         static let saveErrorID = "saveError"
+        static let dueDateID = "dueDate"
     }
 
     enum Symbols {
-        static let unavailable = "trash"
         static let saveError = "exclamationmark.triangle.fill"
     }
 
     enum Strings {
-        static let unavailable: LocalizedStringKey = "Task unavailable"
-        static let unavailableDescription: LocalizedStringKey = "This task was deleted."
         static let editTitle: LocalizedStringKey = "Edit Task"
         static let newTitle: LocalizedStringKey = "New Task"
         static let title: LocalizedStringKey = "Title"
@@ -29,7 +27,6 @@ private enum Constants {
         static let discard: LocalizedStringKey = "Discard changes"
         static let keepEditing: LocalizedStringKey = "Keep editing"
         static let save: LocalizedStringKey = "Save"
-        static let taskGone = String(localized: "This task no longer exists.")
     }
 }
 
@@ -90,36 +87,40 @@ struct TaskFormView: View {
         hasDueDate ? Calendar.current.startOfDay(for: dueDate) : nil
     }
 
+    private var dueDateChanged: Bool {
+        effectiveDueDate != baseline.dueDate.map { Calendar.current.startOfDay(for: $0) }
+    }
+
     private var hasChanges: Bool {
         title != baseline.title
             || notes != baseline.notes
             || priority != baseline.priority
             || isDone != baseline.isDone
-            || effectiveDueDate != baseline.dueDate.map { Calendar.current.startOfDay(for: $0) }
+            || dueDateChanged
     }
 
+    private var editedValues: TaskItem {
+        var task = baseline
+        task.title = trimmedTitle
+        task.notes = notes
+        task.priority = priority
+        task.isDone = isDone
+        if dueDateChanged { task.dueDate = effectiveDueDate }
+        return task
+    }
+
+    // No "task deleted" state: the sheet's presenter lives inside the detail's row branch, so it closes with the row.
     var body: some View {
-        Group {
-            if isEditing, editedTask == nil {
-                ContentUnavailableView(
-                    Constants.Strings.unavailable,
-                    systemImage: Constants.Symbols.unavailable,
-                    description: Text(Constants.Strings.unavailableDescription)
-                )
-                .onAppear { Logger.ui.info("Deleted-while-editing state shown") }
-            } else {
-                form
+        form
+            .navigationTitle(isEditing ? Constants.Strings.editTitle : Constants.Strings.newTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .alert(Constants.Strings.discardPrompt, isPresented: $showingDiscard) {
+                Button(Constants.Strings.discard, role: .destructive) {
+                    Logger.ui.info("Changes discarded")
+                    dismiss()
+                }
+                Button(Constants.Strings.keepEditing, role: .cancel) {}
             }
-        }
-        .navigationTitle(isEditing ? Constants.Strings.editTitle : Constants.Strings.newTitle)
-        .navigationBarTitleDisplayMode(.inline)
-        .alert(Constants.Strings.discardPrompt, isPresented: $showingDiscard) {
-            Button(Constants.Strings.discard, role: .destructive) {
-                Logger.ui.info("Changes discarded")
-                dismiss()
-            }
-            Button(Constants.Strings.keepEditing, role: .cancel) {}
-        }
     }
 
     private var form: some View {
@@ -137,9 +138,8 @@ struct TaskFormView: View {
                         .lineLimit(Constants.Layout.titleLines)
                         // A vertical field turns Return into a newline; titles stay single-paragraph.
                         .onChange(of: title) { _, newValue in
-                            if newValue.contains(where: \.isNewline) {
-                                title = newValue.filter { !$0.isNewline }
-                            }
+                            let singleLine = TaskItem.singleLineTitle(newValue)
+                            if singleLine != newValue { title = singleLine }
                         }
                     TextField(Constants.Strings.notes, text: $notes, axis: .vertical)
                         .lineLimit(Constants.Layout.notesLines)
@@ -151,6 +151,7 @@ struct TaskFormView: View {
                     Toggle(Constants.Strings.dueDate, isOn: $hasDueDate.animation())
                     if hasDueDate {
                         DatePicker(Constants.Strings.due, selection: $dueDate, displayedComponents: .date)
+                            .id(Constants.Layout.dueDateID)
                     }
                 }
                 if isEditing {
@@ -159,9 +160,15 @@ struct TaskFormView: View {
                     }
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .onChange(of: saveError) { _, message in
                 guard message != nil else { return }
                 withAnimation { proxy.scrollTo(Constants.Layout.saveErrorID, anchor: .top) }
+            }
+            .onChange(of: hasDueDate) { _, isOn in
+                guard isOn else { return }
+                // Next turn: the picker row is inserted by this same update and is not laid out yet.
+                Task { withAnimation { proxy.scrollTo(Constants.Layout.dueDateID, anchor: .bottom) } }
             }
         }
         .interactiveDismissDisabled(hasChanges || isSaving)
@@ -209,15 +216,11 @@ struct TaskFormView: View {
             case .add:
                 result = await viewModel.add(title: trimmedTitle, notes: notes, priority: priority, dueDate: effectiveDueDate)
             case .edit:
-                if var task = editedTask {
-                    task.title = trimmedTitle
-                    task.notes = notes
-                    task.priority = priority
-                    task.isDone = isDone
-                    task.dueDate = effectiveDueDate
-                    result = await viewModel.update(task)
+                // Only the user's edits go onto the current row; a toggle that failed meanwhile is not written back.
+                if let current = editedTask {
+                    result = await viewModel.update(current.applying(changesFrom: baseline, to: editedValues))
                 } else {
-                    result = .failed(Constants.Strings.taskGone)
+                    result = .failed(TaskAPIError.notFound.localizedDescription)
                 }
             }
             isSaving = false

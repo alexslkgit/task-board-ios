@@ -92,7 +92,7 @@ An explicit `0` is honoured and is not treated as a missing argument.
 
 ## Tests
 
-Swift Testing, 47 `@Test` functions in 7 suites; the last run reported `Test run with 47 tests in 7 suites passed`.
+Swift Testing, 50 `@Test` functions in 8 suites; the last run reported `Test run with 50 tests in 8 suites passed`.
 
 | Suite | Covers |
 |---|---|
@@ -102,6 +102,7 @@ Swift Testing, 47 `@Test` functions in 7 suites; the last run reported `Test run
 | `DefaultTaskRepositoryTests` | cache hits, forced refresh, generation counter, upsert |
 | `MockTaskAPITests` | CRUD, failure rate, not-found errors |
 | `SeedTests` | seed content and ordering |
+| `TaskItemTests` | edit merge keeps untouched fields, single-line title normalisation |
 | `LaunchConfigurationTests` | defaults, parsing, explicit zero |
 
 Run from the command line:
